@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "mongodb-connector"
+version = "0.1.0"
+description = ""
+authors = ["vinayak-sanketika <vinayakad@sanketika.in>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pyspark = "^3.5.1"
+pymongo = "^4.8.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
