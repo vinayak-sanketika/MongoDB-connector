@@ -1,6 +1,6 @@
 import os
 
-from connector import MongoDbConnector
+from mongoConnector import MongoDbConnector
 from obsrv.connector.batch import SourceConnector
 
 # from obsrv.utils import Config
