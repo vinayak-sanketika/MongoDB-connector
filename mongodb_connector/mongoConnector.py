@@ -41,6 +41,7 @@ class MongoDbConnector(ISourceConnector):
         self.uriDb = None
 
         self.batch_size = 100
+        self.max_batch = 10
 
         self.last_run_time = None
         # self.last_document_time = None
@@ -73,7 +74,7 @@ class MongoDbConnector(ISourceConnector):
         # self._get_provider(connector_config)
         print("Connector Config from process function {0}".format(type(connector_config)))
         self.load_config(connector_config)
-        self._get_documents_to_process(sc)
+        # self._get_documents_to_process(sc)
         for res in self._process_documents(sc):
             yield res
 
@@ -119,55 +120,42 @@ class MongoDbConnector(ISourceConnector):
     def _get_spark_session(self):
         return SparkSession.builder.config(conf=self.get_spark_config()).getOrCreate()
 
-    def _get_documents_to_process(self, sc: SparkSession) -> None:
-        try:
-            self.documents = sc.read.format("mongo").option("uri", self.uri).load()
-
-            print("inside _get_doc printing last_document_time ",self.last_document_time)
-            if self.last_document_time is not None:
-                self.documents = self.documents.filter(
-                     col('tpep_dropoff_datetime') > self.last_document_time
-                ).orderBy(col('tpep_dropoff_datetime'))
-            else:
-                self.documents = self.documents.filter(
-                    col('tpep_dropoff_datetime').isNotNull()
-                ).orderBy(col('tpep_dropoff_datetime'))
-
-            self.documents.show()
-
-            if self.documents.count() == 0:
-                print("No documents found to process.")
-                # exit()
-           
-        except Exception as e:
-            raise Exception(f"Error fetching documents from MongoDB: {e}")
-
     def _process_documents(self, sc: SparkSession) -> Iterator[DataFrame]:
         try:
-            i=0
-            while True:
-                # Fetch the next batch of documents
-                batch_df = self.documents.limit(self.batch_size)
+            batch_number = 0
+            
+            while self.max_batch is None or batch_number < self.max_batch:
+               
+                query = {}
+                if self.last_document_time is not None:
+                    query = {"tpep_dropoff_datetime": {"$gt": self.last_document_time}}
+
+                pipeline = [
+                    {"$match": query}, 
+                    {"$sort": {"tpep_dropoff_datetime": 1}}, 
+                    {"$limit": self.batch_size} 
+                ]
+
+                documents = sc.read.format("mongo") \
+                    .option("uri", self.uri) \
+                    .option("pipeline", str(pipeline)) \
+                    .load()
                 
-                # Check if the batch is empty, if true break else continue
-                if batch_df.count() == 0:
+                documents.show(5)
+                
+                
+                if documents.count() == 0:
                     break
                 
-                # Get and updating last_document_time with the 'tpep_dropoff_datetime' of the last document in the current batch
-                dropoff_times = batch_df.select("tpep_dropoff_datetime").orderBy(desc('tpep_dropoff_datetime')).head(1)
+                dropoff_times = documents.select("tpep_dropoff_datetime").orderBy(desc('tpep_dropoff_datetime')).head(1)
                 
                 if dropoff_times:
                     self.last_document_time = dropoff_times[0]['tpep_dropoff_datetime']
-                    print("first last_document_time", self.last_document_time)
-                    i+=batch_df.count()
-                    print("i",i)
+                    print("Updated last_document_time:", self.last_document_time)
                 
-                yield batch_df
+                yield documents
                 
-                # Updating the documents DataFrame to exclude already processed documents
-                self.documents = self.documents.filter(
-                    col('tpep_dropoff_datetime') > self.last_document_time
-                )
+                batch_number += 1
 
         except Exception as e:
             raise Exception(f"Error processing documents: {e}")
